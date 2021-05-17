@@ -411,9 +411,7 @@ plt.show()
 
 imgShow(subImageRed, title='Red SubImage')
 
-
 print(chi2list)
-
 
 print('end of program')
 
