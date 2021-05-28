@@ -111,7 +111,6 @@ def imgShow(img, r=0, c=0, h=0, w=0, title='', cmap='gray', colorbar=True):
 
 
 #%%
-#from main_fit to determine which distribution best fits our data
 def standarise(array_values, pct, pct_lower):
     # sets up sc shortcut which subtracts mean and scales to units of variance (zscore)
     sc = StandardScaler()
@@ -134,7 +133,7 @@ def standarise(array_values, pct, pct_lower):
     return y_standard, len_av, array_vals
 
 #%%
-def fit_distribution(array_values, pct, pct_lower, img_number):
+def fit_distribution(array_values, pct, pct_lower, row, column):
     # Set up list of candidate distributions to use
     # See https://docs.scipy.org/doc/scipy/reference/stats.html for more
     #trims array_values, returns:
@@ -165,13 +164,12 @@ def fit_distribution(array_values, pct, pct_lower, img_number):
         print(f'we got: {errMsg}')
         return 1
 
-
     print(f'bins = {bins}')
+
     #returns the cumulative sum of the observed frequency
     cum_observed_frequency = np.cumsum(observed_frequency)
 
     # Loop through candidate distributions
-
     for distribution in dist_names:
         # retrieves attributes of the specified distribution from the scipy.stats package
         dist = getattr(scipy.stats, distribution)
@@ -217,16 +215,16 @@ def fit_distribution(array_values, pct, pct_lower, img_number):
     #print('............................................')
     #print(results)
     #print(results.iat[0, 0])
-    histogram(results.iat[0, 0], img_number, y_organized, pct, pct_lower)
+    histogram(results.iat[0, 0], row, column, y_organized, pct, pct_lower)
     return results.iat[0, 0]
 
 #%%
-def histogram(dist_name, img_number, data, pct, pct_lower):
+def histogram(dist_name, row, column, data, pct, pct_lower):
     plt.figure()
     plt.hist(data, bins=10, density=True, color='red')
-    plt.title(f'{dist_name}, image number {img_number}')
-    strFile = (f'histogram/trim_' + str(pct_lower) + '_' + str(pct) + '/' +
-               dist_name + '/' + str(img_number) + '.png')
+    plt.title(f'{dist_name}, row {row}, column {column}')
+    strFile = (f'histogram/trim_' + str(pct_lower) + '_' + str(pct) + '/' + str(row) + '_' + str(column) +
+               '_' + str(dist_name) + '.png')
     plt.savefig(strFile)
 
     if os.path.isfile(strFile):
@@ -235,6 +233,15 @@ def histogram(dist_name, img_number, data, pct, pct_lower):
 
     plt.close()
 
+#%%
+def findMax(redVal, greenRVal, blueVal, greenBVal):
+    values = [(redVal, 'redChan'),
+              (greenRVal, 'green_rChan'),
+              (blueVal, 'blueChan'),
+              (greenBVal, 'green_bChan')]
+    values = sorted(values, key=lambda values: values[0])
+
+    return values[3], values[2]
 
 #%%
 if __name__ == '__main__':
@@ -250,17 +257,24 @@ if __name__ == '__main__':
     for idx, imgFname in enumerate(rawImgList):
         print(f'imgFname[{idx}] = {imgFname}')
 
+
+
+
     # Allow user to select one of the images:
     if useImg0:
-        selectedImgNum = 2
+        selectedImgNum = 3
     else:
         selectedImgNum = eval(input('Select desired image: '))
 
     rawImg = readRawImage(rawImgList[selectedImgNum])  # read raw image object
-    rawMosaic = rawImg.raw_image  # Extract raw arrays from the raw image class. Note: MOSAICED image
-    rawCFA = rawImg.raw_colors  # Extract the color-filter array mask; 0,1,2,3 for R, G_r, G_b, B
+    #_visible so that the mosiaced image will not include the borders around the image
+    rawMosaic = rawImg.raw_image_visible # Extract raw arrays from the raw image class. Note: MOSAICED image
+    rawCFA = rawImg.raw_colors_visible  # Extract the color-filter array mask; 0,1,2,3 for R, G_r, G_b, B
+
+
 
     print(f'type(rawImage) = {type(rawMosaic)}   rawImage.shape = {rawMosaic.shape}')
+
 
     # Display the *mosaiced* image as a grayscale image
     plt.imshow(rawMosaic, cmap='gray')
@@ -278,11 +292,21 @@ if __name__ == '__main__':
 
 
     # Extract one channel at a time:
-    redChan     = extractOneBayerChannel(rawMosaic, rawCFA, 0, verbose=True)  # First channel 0 (R)
+    redChan     = extractOneBayerChannel(rawMosaic, rawCFA, 0, verbose=False)  # First channel 0 (R)
     green_rChan = extractOneBayerChannel(rawMosaic, rawCFA, 1, verbose=False)  # First channel 1 (G_r)
     blueChan    = extractOneBayerChannel(rawMosaic, rawCFA, 2)  # First channel 2 (B)
     green_bChan = extractOneBayerChannel(rawMosaic, rawCFA, 3)  # First channel 3 (G_b)
 
+    print(f' redChan shape is {redChan.shape}')
+    print(f' green_rChan shape is {green_rChan.shape}')
+    print(f' blueChan shape is {blueChan.shape}')
+    print(f' green_bChan shape is {green_bChan.shape}')
+
+    redChan_flat = redChan.flatten()
+    green_rChan_flat = green_rChan.flatten()
+    blueChan_flat = blueChan.flatten()
+    green_bChan_flat = green_bChan.flatten()
+    '''
     redChanMean = np.mean(redChan.flatten())
     redChanStdv = np.std(redChan.flatten())
     print(f'redChanMean = {redChanMean:0.2f} ({redChanStdv:0.2f})')
@@ -295,6 +319,7 @@ if __name__ == '__main__':
     green_bChanMean = np.mean(green_bChan.flatten())
     green_bChanStdv = np.std(green_bChan.flatten())
     print(f'green_bChan mean = {green_bChanMean:0.2f} ({green_bChanStdv:0.2f})')
+    '''
 
 
 '''
@@ -312,14 +337,59 @@ plt.show()
 # for partitioning parts of images
 # calling fit_distribution for each image
 # plotting the histogram for each image
+imageH, imageW = redChan.shape
+indexOfNoise = []
+tolerance = 0.6
+maxLimit = 70
+'''
+we will have to decide on the actual noise tolerance later.
+This is the value which, once added and subtracted
+from the value in an index of a channel, will determine the lower
+and upper limit of what is considered 'equal'. Anything outside 
+of that range will be considered unequal, and has the potential of being noise.
+'''
+
+for i in range(len(redChan_flat)): #since all channels are the same size, we just use red for the range
+    noise = False
+    max, max2 = findMax(redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i])
+    #tolerance = findTolerance(max)
+    '''
+    If the value at i passes all of these if statements without entering them,
+    then the values are all roughly the same (within tolerance) and it is not
+    noise so noise remains False. If any of these if statements are true, then
+    noise becomes True.
+    If noise is True but enters another if statement, that means that two of the 
+    values in the channels are outside of tolerance and that value is not noise,
+    so we terminate the current loop iteration.
+    '''
+    '''
+    if (redChan[i] < (green_rChan[i] - tolerance)) or (redChan[i] > (green_rChan[i] + tolerance)):
+        noise = not noise
+    if (redChan[i] < (blueChan[i] - tolerance)) or (redChan[i] > (blueChan[i] + tolerance)):
+        noise = not noise
+    if (redChan[i] < (green_bChan[i] - tolerance)) or (redChan[i] > (green_bChan[i] + tolerance)):
+        noise = not noise
+    '''
+    if (max2[0] < tolerance*max[0]) and (max[0] > maxLimit):
+        noise = True
+
+    if (noise == True):
+        indexOfNoise.append([(i%imageW)*2, (i//imageW)*2, max[1], max[0], max2[0]])
+
+print(indexOfNoise)
+name = rawImgList[selectedImgNum].split('\\')
+data = np.asarray(indexOfNoise)
+pd.DataFrame(indexOfNoise).to_csv(f"new_noise_{name[-1]}_{tolerance}_maxLimit{maxLimit}.csv")
+print('--------------------------------------------------------------------------------------')
 
 count = 1
-imageH, imageW = redChan.shape
+
 subImageRows, subImageCols = 20, 20
 h, w = int((imageH / subImageRows)), int((imageW / subImageCols)) #height and width of the subimages
 
-# for showing the image as 5x5 subimages
+# for showing the image as subimages
 rawImageH, rawImageW = rawMosaic.shape
+# so that we don't alter the original data
 rawMosaicSplit = rawMosaic
 print(f'max of rawMosaicSplit is {np.max(rawMosaicSplit)}')
 intervalH = rawImageH//subImageRows
@@ -336,6 +406,7 @@ print(f'{len(redChan.flatten())}')
 upper_pct = 0.999
 lower_pct = 0
 filepath = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/')
+'''
 try:
     os.mkdir(filepath)
     os.mkdir(filepath + 'weibull_min' + '/')
@@ -364,7 +435,7 @@ except FileExistsError:
     os.mkdir(filepath + 'lognorm' + '/')
     os.mkdir(filepath + 'pearson3' + '/')
     os.mkdir(filepath + 'triang' + '/')
-
+'''
 
 
 for y in range(int(subImageRows)):
@@ -391,11 +462,7 @@ for y in range(int(subImageRows)):
         print('Calling fit_distribution ...')
         # fit_distribution('price', 0.99, 0.01)
         # do upper percent, lower percent
-        distribution = fit_distribution(pixels_red, upper_pct, lower_pct, count)
-
-        #can't plot without the distribution, so always plot the untrimmed histograms for comparison
-        if (distribution != 1):
-            histogram(distribution, count, pixels_red, 1, 0)
+        distribution = fit_distribution(pixels_red, upper_pct, lower_pct, y, x)
         chi2list.append(distribution)
         print('Back from fit_distribution ...')
         #histogram will be called in fit_distribution so that it graphs with the trim
@@ -407,9 +474,10 @@ for y in range(int(subImageRows)):
 
 plt.imshow(rawMosaicSplit, cmap='gray')
 plt.title("rawMosaicSplit after lines")
-plt.show()
+strFile = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/' + 'fullImageSplit' + '.png')
+plt.savefig(strFile)
 
-imgShow(subImageRed, title='Red SubImage')
+#imgShow(subImageRed, title='Red SubImage')
 
 print(chi2list)
 
