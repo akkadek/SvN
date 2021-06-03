@@ -262,7 +262,7 @@ if __name__ == '__main__':
 
     # Allow user to select one of the images:
     if useImg0:
-        selectedImgNum = 3
+        selectedImgNum = 26
     else:
         selectedImgNum = eval(input('Select desired image: '))
 
@@ -277,9 +277,11 @@ if __name__ == '__main__':
 
 
     # Display the *mosaiced* image as a grayscale image
+    '''
     plt.imshow(rawMosaic, cmap='gray')
     plt.title("rawMosaic before splitting")
     plt.show()
+    '''
 
 
     '''
@@ -297,15 +299,21 @@ if __name__ == '__main__':
     blueChan    = extractOneBayerChannel(rawMosaic, rawCFA, 2)  # First channel 2 (B)
     green_bChan = extractOneBayerChannel(rawMosaic, rawCFA, 3)  # First channel 3 (G_b)
 
-    print(f' redChan shape is {redChan.shape}')
-    print(f' green_rChan shape is {green_rChan.shape}')
-    print(f' blueChan shape is {blueChan.shape}')
-    print(f' green_bChan shape is {green_bChan.shape}')
+    r, c = 2055, 825 #upper left corner: row, column coordinate
+    w, h = 10, 10  #width and height of subimage
 
-    redChan_flat = redChan.flatten()
-    green_rChan_flat = green_rChan.flatten()
-    blueChan_flat = blueChan.flatten()
-    green_bChan_flat = green_bChan.flatten()
+    #subimages of the four channels, original size: 2142 x 1422
+    redSubimage = redChan[c:c+h, r:r+w]
+    green_rSubimage = green_rChan[c:c+h, r:r+w]
+    blueSubimage = blueChan[c:c+h, r:r+w]
+    green_bSubimage = green_bChan[c:c+h, r:r+w]
+
+
+
+    redChan_flat = redSubimage.flatten()
+    green_rChan_flat = green_rSubimage.flatten()
+    blueChan_flat = blueSubimage.flatten()
+    green_bChan_flat = green_bSubimage.flatten()
     '''
     redChanMean = np.mean(redChan.flatten())
     redChanStdv = np.std(redChan.flatten())
@@ -322,165 +330,141 @@ if __name__ == '__main__':
     '''
 
 
-'''
-print(f'redchan.shape = {redChan.shape}')
-subImageRed = redChan[0:200, 0:200]
-df = subImageRed.flatten()
-print(f'redchan.shape = {redChan.shape}')
-print(f'df.shape = {df.shape}')
-'''
-
-
-plt.imshow(redChan, cmap='gray')
-plt.title("redChan")
-plt.show()
-# for partitioning parts of images
-# calling fit_distribution for each image
-# plotting the histogram for each image
-imageH, imageW = redChan.shape
-indexOfNoise = []
-tolerance = 0.6
-maxLimit = 70
-'''
-we will have to decide on the actual noise tolerance later.
-This is the value which, once added and subtracted
-from the value in an index of a channel, will determine the lower
-and upper limit of what is considered 'equal'. Anything outside 
-of that range will be considered unequal, and has the potential of being noise.
-'''
-
-for i in range(len(redChan_flat)): #since all channels are the same size, we just use red for the range
-    noise = False
-    max, max2 = findMax(redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i])
-    #tolerance = findTolerance(max)
     '''
-    If the value at i passes all of these if statements without entering them,
-    then the values are all roughly the same (within tolerance) and it is not
-    noise so noise remains False. If any of these if statements are true, then
-    noise becomes True.
-    If noise is True but enters another if statement, that means that two of the 
-    values in the channels are outside of tolerance and that value is not noise,
-    so we terminate the current loop iteration.
+    print(f'redchan.shape = {redChan.shape}')
+    subImageRed = redChan[0:200, 0:200]
+    df = subImageRed.flatten()
+    print(f'redchan.shape = {redChan.shape}')
+    print(f'df.shape = {df.shape}')
     '''
+
+    indexOfNoise = []
+    tolerance = 0.6
+    maxLimit = 70
+
+
+    for i in range(len(redChan_flat)): #since all channels are the same size, we just use red for the range
+        noise = False
+        max, max2 = findMax(redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i])
+
+        if (max2[0] < tolerance*max[0]) and (max[0] > maxLimit):
+            noise = True
+
+        if (noise == True):
+            #appends x coordinate, y coordinate, the channnel that contains the damage,
+            #the damages channel value (the max), and the 2nd highest channel value
+            indexOfNoise.append([(r + (i%w))*2, (c + (i//w))*2, max[1], max[0], max2[0]])
+            #r+(i%w), c+(i//w)
+
+    print(indexOfNoise)
+    name = rawImgList[selectedImgNum].split('\\')
+    data = np.asarray(indexOfNoise)
+    pd.DataFrame(indexOfNoise).to_csv(f"{name[-1]}_tolerance{tolerance}_maxLimit{maxLimit}_xy{r*2}-{c*2}_wh{w*2}-{h*2}.csv")
+    print('--------------------------------------------------------------------------------------')
+
     '''
-    if (redChan[i] < (green_rChan[i] - tolerance)) or (redChan[i] > (green_rChan[i] + tolerance)):
-        noise = not noise
-    if (redChan[i] < (blueChan[i] - tolerance)) or (redChan[i] > (blueChan[i] + tolerance)):
-        noise = not noise
-    if (redChan[i] < (green_bChan[i] - tolerance)) or (redChan[i] > (green_bChan[i] + tolerance)):
-        noise = not noise
+    count = 1
+    
+    subImageRows, subImageCols = 20, 20
+    h, w = int((imageH / subImageRows)), int((imageW / subImageCols)) #height and width of the subimages
+    
+    # for showing the image as subimages
+    rawImageH, rawImageW = rawMosaic.shape
+    # so that we don't alter the original data
+    rawMosaicSplit = rawMosaic
+    print(f'max of rawMosaicSplit is {np.max(rawMosaicSplit)}')
+    intervalH = rawImageH//subImageRows
+    intervalW = rawImageW//subImageCols
+    
+    #plt.imshow(rawMosaicSplit, cmap='gray')
+    
+    #list of the top distribution as determined by fit_distribution
+    chi2list = []
+    print(f'{len(redChan.flatten())}')
+    
+    
+    #trim to be used for fit_distribution
+    upper_pct = 0.999
+    lower_pct = 0
+    filepath = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/')
+    
+    try:
+        os.mkdir(filepath)
+        os.mkdir(filepath + 'weibull_min' + '/')
+        os.mkdir(filepath + 'norm' + '/')
+        os.mkdir(filepath + 'weibull_max' + '/')
+        os.mkdir(filepath + 'beta' + '/')
+        os.mkdir(filepath + 'invgauss' + '/')
+        os.mkdir(filepath + 'uniform' + '/')
+        os.mkdir(filepath + 'gamma' + '/')
+        os.mkdir(filepath + 'expon' + '/')
+        os.mkdir(filepath + 'lognorm' + '/')
+        os.mkdir(filepath + 'pearson3' + '/')
+        os.mkdir(filepath + 'triang' + '/')
+    except FileExistsError:
+        shutil.rmtree(filepath)
+        print('pre-existing directory removed')
+        os.mkdir(filepath)
+        os.mkdir(filepath + 'weibull_min' + '/')
+        os.mkdir(filepath + 'norm' + '/')
+        os.mkdir(filepath + 'weibull_max' + '/')
+        os.mkdir(filepath + 'beta' + '/')
+        os.mkdir(filepath + 'invgauss' + '/')
+        os.mkdir(filepath + 'uniform' + '/')
+        os.mkdir(filepath + 'gamma' + '/')
+        os.mkdir(filepath + 'expon' + '/')
+        os.mkdir(filepath + 'lognorm' + '/')
+        os.mkdir(filepath + 'pearson3' + '/')
+        os.mkdir(filepath + 'triang' + '/')
+    
+    # for partitioning parts of images
+    # calling fit_distribution for each image
+    # plotting the histogram for each image
+    
+    for y in range(int(subImageRows)):
+        rawMosaicSplit[y * intervalH] = 4000  # put in a horizontal line
+        rawMosaicSplit[(y * intervalH) + 1] = 4000
+        for x in range(int(subImageCols)):
+            rawMosaicSplit[:,x*intervalW] = 4000 #put in a vertical line
+            rawMosaicSplit[:, (x * intervalW) + 1] = 4000
+    
+            r, c = y*h, x*w
+    
+            subImageRed = redChan[r:r + h, c:c + w]
+    
+            print('\n')
+            print(f'number {count}')
+            subRedMean = np.mean(subImageRed.flatten())
+            subRedStdv = np.std(subImageRed.flatten())
+            print(f'subRedMean = {subRedMean:0.2f} ({subRedStdv:0.2f})')
+    
+            pixels_red = subImageRed.flatten()
+            plt.figure()
+    
+    
+            print('Calling fit_distribution ...')
+            # fit_distribution('price', 0.99, 0.01)
+            # do upper percent, lower percent
+            distribution = fit_distribution(pixels_red, upper_pct, lower_pct, y, x)
+            chi2list.append(distribution)
+            print('Back from fit_distribution ...')
+            #histogram will be called in fit_distribution so that it graphs with the trim
+    
+            x = x + 1
+            count = count + 1
+    
+        y = y + 1
+    
+    plt.imshow(rawMosaicSplit, cmap='gray')
+    plt.title("rawMosaicSplit after lines")
+    strFile = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/' + 'fullImageSplit' + '.png')
+    plt.savefig(strFile)
+    
+    #imgShow(subImageRed, title='Red SubImage')
+    
+    print(chi2list)
     '''
-    if (max2[0] < tolerance*max[0]) and (max[0] > maxLimit):
-        noise = True
 
-    if (noise == True):
-        indexOfNoise.append([(i%imageW)*2, (i//imageW)*2, max[1], max[0], max2[0]])
+    print('end of program')
 
-print(indexOfNoise)
-name = rawImgList[selectedImgNum].split('\\')
-data = np.asarray(indexOfNoise)
-pd.DataFrame(indexOfNoise).to_csv(f"new_noise_{name[-1]}_{tolerance}_maxLimit{maxLimit}.csv")
-print('--------------------------------------------------------------------------------------')
-
-count = 1
-
-subImageRows, subImageCols = 20, 20
-h, w = int((imageH / subImageRows)), int((imageW / subImageCols)) #height and width of the subimages
-
-# for showing the image as subimages
-rawImageH, rawImageW = rawMosaic.shape
-# so that we don't alter the original data
-rawMosaicSplit = rawMosaic
-print(f'max of rawMosaicSplit is {np.max(rawMosaicSplit)}')
-intervalH = rawImageH//subImageRows
-intervalW = rawImageW//subImageCols
-
-#plt.imshow(rawMosaicSplit, cmap='gray')
-
-#list of the top distribution as determined by fit_distribution
-chi2list = []
-print(f'{len(redChan.flatten())}')
-
-
-#trim to be used for fit_distribution
-upper_pct = 0.999
-lower_pct = 0
-filepath = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/')
-'''
-try:
-    os.mkdir(filepath)
-    os.mkdir(filepath + 'weibull_min' + '/')
-    os.mkdir(filepath + 'norm' + '/')
-    os.mkdir(filepath + 'weibull_max' + '/')
-    os.mkdir(filepath + 'beta' + '/')
-    os.mkdir(filepath + 'invgauss' + '/')
-    os.mkdir(filepath + 'uniform' + '/')
-    os.mkdir(filepath + 'gamma' + '/')
-    os.mkdir(filepath + 'expon' + '/')
-    os.mkdir(filepath + 'lognorm' + '/')
-    os.mkdir(filepath + 'pearson3' + '/')
-    os.mkdir(filepath + 'triang' + '/')
-except FileExistsError:
-    shutil.rmtree(filepath)
-    print('pre-existing directory removed')
-    os.mkdir(filepath)
-    os.mkdir(filepath + 'weibull_min' + '/')
-    os.mkdir(filepath + 'norm' + '/')
-    os.mkdir(filepath + 'weibull_max' + '/')
-    os.mkdir(filepath + 'beta' + '/')
-    os.mkdir(filepath + 'invgauss' + '/')
-    os.mkdir(filepath + 'uniform' + '/')
-    os.mkdir(filepath + 'gamma' + '/')
-    os.mkdir(filepath + 'expon' + '/')
-    os.mkdir(filepath + 'lognorm' + '/')
-    os.mkdir(filepath + 'pearson3' + '/')
-    os.mkdir(filepath + 'triang' + '/')
-'''
-
-
-for y in range(int(subImageRows)):
-    rawMosaicSplit[y * intervalH] = 4000  # put in a horizontal line
-    rawMosaicSplit[(y * intervalH) + 1] = 4000
-    for x in range(int(subImageCols)):
-        rawMosaicSplit[:,x*intervalW] = 4000 #put in a vertical line
-        rawMosaicSplit[:, (x * intervalW) + 1] = 4000
-
-        r, c = y*h, x*w
-
-        subImageRed = redChan[r:r + h, c:c + w]
-
-        print('\n')
-        print(f'number {count}')
-        subRedMean = np.mean(subImageRed.flatten())
-        subRedStdv = np.std(subImageRed.flatten())
-        print(f'subRedMean = {subRedMean:0.2f} ({subRedStdv:0.2f})')
-
-        pixels_red = subImageRed.flatten()
-        plt.figure()
-
-
-        print('Calling fit_distribution ...')
-        # fit_distribution('price', 0.99, 0.01)
-        # do upper percent, lower percent
-        distribution = fit_distribution(pixels_red, upper_pct, lower_pct, y, x)
-        chi2list.append(distribution)
-        print('Back from fit_distribution ...')
-        #histogram will be called in fit_distribution so that it graphs with the trim
-
-        x = x + 1
-        count = count + 1
-
-    y = y + 1
-
-plt.imshow(rawMosaicSplit, cmap='gray')
-plt.title("rawMosaicSplit after lines")
-strFile = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/' + 'fullImageSplit' + '.png')
-plt.savefig(strFile)
-
-#imgShow(subImageRed, title='Red SubImage')
-
-print(chi2list)
-
-print('end of program')
-
-sys.exit()
+    sys.exit()
