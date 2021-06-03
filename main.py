@@ -258,8 +258,6 @@ if __name__ == '__main__':
         print(f'imgFname[{idx}] = {imgFname}')
 
 
-
-
     # Allow user to select one of the images:
     if useImg0:
         selectedImgNum = 26
@@ -272,7 +270,6 @@ if __name__ == '__main__':
     rawCFA = rawImg.raw_colors_visible  # Extract the color-filter array mask; 0,1,2,3 for R, G_r, G_b, B
 
 
-
     print(f'type(rawImage) = {type(rawMosaic)}   rawImage.shape = {rawMosaic.shape}')
 
 
@@ -280,15 +277,6 @@ if __name__ == '__main__':
     '''
     plt.imshow(rawMosaic, cmap='gray')
     plt.title("rawMosaic before splitting")
-    plt.show()
-    '''
-
-
-    '''
-    # Display a small portion of the *mosaiced* image as a grayscale image
-    r,c = 0,0  # row,col of upper-left pixel
-    h,w = 200,200  # height and width of sub-image to be displayed
-    plt.imshow(rawMosaic[r:r+h,c:c+w], cmap='gray')
     plt.show()
     '''
 
