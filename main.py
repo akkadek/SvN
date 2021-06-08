@@ -235,13 +235,89 @@ def histogram(dist_name, row, column, data, pct, pct_lower):
 
 #%%
 def findMax(redVal, greenRVal, blueVal, greenBVal):
-    values = [(redVal, 'redChan'),
-              (greenRVal, 'green_rChan'),
-              (blueVal, 'blueChan'),
-              (greenBVal, 'green_bChan')]
+    values = [(redVal, 'red'),
+              (greenRVal, 'green_r'),
+              (blueVal, 'blue'),
+              (greenBVal, 'green_b')]
     values = sorted(values, key=lambda values: values[0])
 
     return values[3], values[2]
+
+#%%
+class BayerChannel:
+    def __init__(self, red, green_r, blue, green_b, column, row, width, height):
+        self._red = red
+        self._green_r = green_r
+        self._blue = blue
+        self._green_b = green_b
+        self._column = column
+        self._row = row
+        self._width = width
+        self._height = height
+
+    def get_red(self):
+        return self._red
+
+    def get_green_r(self):
+        return self._green_r
+
+    def get_blue(self):
+        return self._blue
+
+    def get_green_b(self):
+        return self._green_b
+
+    def set_column_row(self, column, row):
+        self._column = column
+        self._row = row
+
+    def set_all_channel_sub_images(self):
+        red = self._red[self._row:self._row + self._height, self._column:self._column + self._width]
+        green_r = self._green_r[self._row:self._row + self._height, self._column:self._column + self._width]
+        blue = self._blue[self._row:self._row + self._height, self._column:self._column + self._width]
+        green_b = self._green_b[self._row:self._row + self._height, self._column:self._column + self._width]
+
+        return red, green_r, blue, green_b
+
+    def get_red_subimage(self):
+        channels = self.set_all_channel_sub_images()
+        return channels[0]
+
+    def get_green_r_subimage(self):
+        channels = self.set_all_channel_sub_images()
+        return channels[1]
+
+    def get_blue_subimage(self):
+        channels = self.set_all_channel_sub_images()
+        return channels[2]
+
+    def get_green_b_subimage(self):
+        channels = self.set_all_channel_sub_images()
+        return channels[3]
+
+    def all_channel_flat(self):
+        red, green_r, blue, green_b = self.set_all_channel_sub_images()
+        return red.flatten(), green_r.flatten(), blue.flatten(), green_b.flatten()
+
+    def all_channel_stats(self):
+        red, green_r, blue, green_b = self.all_channel_flat()
+        redStats = np.mean(red), np.std(red)
+        green_rStats = np.mean(green_r), np.std(green_r)
+        blueStats = np.mean(blue), np.std(blue)
+        green_bStats = np.mean(green_b), np.std(green_b)
+        return redStats, green_rStats, blueStats, green_bStats
+
+    @staticmethod
+    def one_channel_stats(channel, stats):
+        if channel == 'red':
+            return stats[0]
+        if channel == 'green_r':
+            return stats[1]
+        if channel == 'blue':
+            return stats[2]
+        if channel == 'green_b':
+            return stats[3]
+
 
 #%%
 if __name__ == '__main__':
@@ -260,7 +336,7 @@ if __name__ == '__main__':
 
     # Allow user to select one of the images:
     if useImg0:
-        selectedImgNum = 26
+        selectedImgNum = 2
     else:
         selectedImgNum = eval(input('Select desired image: '))
 
@@ -269,9 +345,7 @@ if __name__ == '__main__':
     rawMosaic = rawImg.raw_image_visible # Extract raw arrays from the raw image class. Note: MOSAICED image
     rawCFA = rawImg.raw_colors_visible  # Extract the color-filter array mask; 0,1,2,3 for R, G_r, G_b, B
 
-
     print(f'type(rawImage) = {type(rawMosaic)}   rawImage.shape = {rawMosaic.shape}')
-
 
     # Display the *mosaiced* image as a grayscale image
     '''
@@ -280,13 +354,20 @@ if __name__ == '__main__':
     plt.show()
     '''
 
-
     # Extract one channel at a time:
     redChan     = extractOneBayerChannel(rawMosaic, rawCFA, 0, verbose=False)  # First channel 0 (R)
     green_rChan = extractOneBayerChannel(rawMosaic, rawCFA, 1, verbose=False)  # First channel 1 (G_r)
     blueChan    = extractOneBayerChannel(rawMosaic, rawCFA, 2)  # First channel 2 (B)
     green_bChan = extractOneBayerChannel(rawMosaic, rawCFA, 3)  # First channel 3 (G_b)
 
+    #the name of the image
+    name = rawImgList[selectedImgNum].split('\\')
+
+    print(f'redChan shape is {redChan.shape}')
+    print(f'green_rChan shape is {green_rChan.shape}')
+    print(f'blueChan shape is {blueChan.shape}')
+    print(f'green_bChan shape is {green_bChan.shape}')
+    '''
     r, c = 2055, 825 #upper left corner: row, column coordinate
     w, h = 10, 10  #width and height of subimage
 
@@ -296,40 +377,14 @@ if __name__ == '__main__':
     blueSubimage = blueChan[c:c+h, r:r+w]
     green_bSubimage = green_bChan[c:c+h, r:r+w]
 
-
-
     redChan_flat = redSubimage.flatten()
     green_rChan_flat = green_rSubimage.flatten()
     blueChan_flat = blueSubimage.flatten()
     green_bChan_flat = green_bSubimage.flatten()
-    '''
-    redChanMean = np.mean(redChan.flatten())
-    redChanStdv = np.std(redChan.flatten())
-    print(f'redChanMean = {redChanMean:0.2f} ({redChanStdv:0.2f})')
-    green_rChanMean = np.mean(green_rChan.flatten())
-    green_rChanStdv = np.std(green_rChan.flatten())
-    print(f'green_rChan mean = {green_rChanMean:0.2f} ({green_rChanStdv:0.2f})')
-    blueChanMean = np.mean(blueChan.flatten())
-    blueChanStdv = np.std(blueChan.flatten())
-    print(f'blueChan mean = {blueChanMean:0.2f} ({blueChanStdv:0.2f})')
-    green_bChanMean = np.mean(green_bChan.flatten())
-    green_bChanStdv = np.std(green_bChan.flatten())
-    print(f'green_bChan mean = {green_bChanMean:0.2f} ({green_bChanStdv:0.2f})')
-    '''
-
-
-    '''
-    print(f'redchan.shape = {redChan.shape}')
-    subImageRed = redChan[0:200, 0:200]
-    df = subImageRed.flatten()
-    print(f'redchan.shape = {redChan.shape}')
-    print(f'df.shape = {df.shape}')
-    '''
 
     indexOfNoise = []
     tolerance = 0.6
     maxLimit = 70
-
 
     for i in range(len(redChan_flat)): #since all channels are the same size, we just use red for the range
         noise = False
@@ -349,66 +404,29 @@ if __name__ == '__main__':
     data = np.asarray(indexOfNoise)
     pd.DataFrame(indexOfNoise).to_csv(f"{name[-1]}_tolerance{tolerance}_maxLimit{maxLimit}_xy{r*2}-{c*2}_wh{w*2}-{h*2}.csv")
     print('--------------------------------------------------------------------------------------')
-
     '''
+
     count = 1
-    
-    subImageRows, subImageCols = 20, 20
-    h, w = int((imageH / subImageRows)), int((imageW / subImageCols)) #height and width of the subimages
-    
-    # for showing the image as subimages
+
+    #the following calculations assume all of the four bayer channels have the same dimensions
+    imageH, imageW = redChan.shape
+    subImageRows, subImageCols = 25, 25
+    # height and width of the subimages
+    h, w = int((imageH / subImageRows)), int((imageW / subImageCols))
+
+    #rawMosaic has different dimenstions than the 4 bayer channels (2x size)
     rawImageH, rawImageW = rawMosaic.shape
+    print(f' imageH, imageW = {imageH}, {imageW} \n rawImageH, rawImageW = {rawImageH}, {rawImageW}')
+    # for showing the image as subimages
     # so that we don't alter the original data
     rawMosaicSplit = rawMosaic
-    print(f'max of rawMosaicSplit is {np.max(rawMosaicSplit)}')
     intervalH = rawImageH//subImageRows
     intervalW = rawImageW//subImageCols
-    
-    #plt.imshow(rawMosaicSplit, cmap='gray')
-    
-    #list of the top distribution as determined by fit_distribution
-    chi2list = []
-    print(f'{len(redChan.flatten())}')
-    
-    
-    #trim to be used for fit_distribution
-    upper_pct = 0.999
-    lower_pct = 0
-    filepath = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/')
-    
-    try:
-        os.mkdir(filepath)
-        os.mkdir(filepath + 'weibull_min' + '/')
-        os.mkdir(filepath + 'norm' + '/')
-        os.mkdir(filepath + 'weibull_max' + '/')
-        os.mkdir(filepath + 'beta' + '/')
-        os.mkdir(filepath + 'invgauss' + '/')
-        os.mkdir(filepath + 'uniform' + '/')
-        os.mkdir(filepath + 'gamma' + '/')
-        os.mkdir(filepath + 'expon' + '/')
-        os.mkdir(filepath + 'lognorm' + '/')
-        os.mkdir(filepath + 'pearson3' + '/')
-        os.mkdir(filepath + 'triang' + '/')
-    except FileExistsError:
-        shutil.rmtree(filepath)
-        print('pre-existing directory removed')
-        os.mkdir(filepath)
-        os.mkdir(filepath + 'weibull_min' + '/')
-        os.mkdir(filepath + 'norm' + '/')
-        os.mkdir(filepath + 'weibull_max' + '/')
-        os.mkdir(filepath + 'beta' + '/')
-        os.mkdir(filepath + 'invgauss' + '/')
-        os.mkdir(filepath + 'uniform' + '/')
-        os.mkdir(filepath + 'gamma' + '/')
-        os.mkdir(filepath + 'expon' + '/')
-        os.mkdir(filepath + 'lognorm' + '/')
-        os.mkdir(filepath + 'pearson3' + '/')
-        os.mkdir(filepath + 'triang' + '/')
-    
+
+    c, r = 0, 0 #to initialize object - will be changed inside the loop
+    image3 = BayerChannel(redChan, green_rChan, blueChan, green_bChan, c, r, w, h)
     # for partitioning parts of images
-    # calling fit_distribution for each image
-    # plotting the histogram for each image
-    
+
     for y in range(int(subImageRows)):
         rawMosaicSplit[y * intervalH] = 4000  # put in a horizontal line
         rawMosaicSplit[(y * intervalH) + 1] = 4000
@@ -416,28 +434,54 @@ if __name__ == '__main__':
             rawMosaicSplit[:,x*intervalW] = 4000 #put in a vertical line
             rawMosaicSplit[:, (x * intervalW) + 1] = 4000
     
-            r, c = y*h, x*w
-    
-            subImageRed = redChan[r:r + h, c:c + w]
-    
+            r, c = y*h, x*w #row, column of upper left corner of subimage
+            #note to self: column is x coordinate, row is y coordinate
+            image3.set_column_row(c, r)
+
+            #subImage designation assigns height, then width of subimage
+            redSubImage = image3.get_red_subimage()
+            green_rSubImage = image3.get_green_r_subimage()
+            blueSubImage = image3.get_blue_subimage()
+            green_bSubImage = image3.get_green_b_subimage()
+
             print('\n')
             print(f'number {count}')
-            subRedMean = np.mean(subImageRed.flatten())
-            subRedStdv = np.std(subImageRed.flatten())
-            print(f'subRedMean = {subRedMean:0.2f} ({subRedStdv:0.2f})')
-    
-            pixels_red = subImageRed.flatten()
+
+            redChan_flat = redSubImage.flatten()
+            green_rChan_flat = green_rSubImage.flatten()
+            blueChan_flat = blueSubImage.flatten()
+            green_bChan_flat = green_bSubImage.flatten()
+
+            stats = image3.all_channel_stats()
+            print(f'all_channel_stats {stats}')
+
             plt.figure()
-    
-    
-            print('Calling fit_distribution ...')
-            # fit_distribution('price', 0.99, 0.01)
-            # do upper percent, lower percent
-            distribution = fit_distribution(pixels_red, upper_pct, lower_pct, y, x)
-            chi2list.append(distribution)
-            print('Back from fit_distribution ...')
-            #histogram will be called in fit_distribution so that it graphs with the trim
-    
+
+            indexOfNoise = []
+            tolerance = 0.6
+
+
+            for i in range(len(redChan_flat)):  # since all channels are the same size, we just use red for the range
+                noise = False
+                max, max2 = findMax(redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i])
+                mean, stdv = image3.one_channel_stats(max[1], stats)
+                maxLimit = mean + stdv
+                #maxLimit = 70
+
+                if (max2[0] < tolerance * max[0]) and (max[0] > maxLimit) and (max[0] > 30):
+                    noise = True
+
+                if (noise == True):
+                    # appends x coordinate, y coordinate, the channel that contains the damage,
+                    # the damages channel value (the max), and the 2nd highest channel value
+                    indexOfNoise.append([(c + (i % w)) * 2, (r + (i // w)) * 2, max[1], max[0], max2[0]])
+
+            #print(indexOfNoise)
+            data = np.asarray(indexOfNoise)
+            pd.DataFrame(indexOfNoise).to_csv(
+                f"visual_noise/variable maxLimit with minimum/row{y+1}_column{x+1}_{name[-1]}_tolerance{tolerance}_xy{c * 2}-{r * 2}_wh{w * 2}-{h * 2}.csv")
+            print('--------------------------------------------------------------------------------------')
+
             x = x + 1
             count = count + 1
     
@@ -445,13 +489,9 @@ if __name__ == '__main__':
     
     plt.imshow(rawMosaicSplit, cmap='gray')
     plt.title("rawMosaicSplit after lines")
-    strFile = (f'histogram/trim_' + str(lower_pct) + '_' + str(upper_pct) + '/' + 'fullImageSplit' + '.png')
+    strFile = (f'visual_noise' + '/' + str(name[-1]) + '_split' + '.png')
     plt.savefig(strFile)
-    
-    #imgShow(subImageRed, title='Red SubImage')
-    
-    print(chi2list)
-    '''
+
 
     print('end of program')
 
