@@ -575,7 +575,6 @@ if __name__ == '__main__':
         print('No noise')
         pass
 
-
     plt.imshow(rawMosaicSplit, cmap='gray')
     plt.title("rawMosaicSplit after lines")
     strFile = (f'visual_noise' + '/' + str(name[-1]) + '_split' + '.png')
