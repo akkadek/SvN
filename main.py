@@ -8,6 +8,14 @@
 # The following code sample assumes that at least one NEF (or nef) image file is in a folder named 'images'
 # in the current working directory.
 
+'''
+try different examination window sizes
+try adding 2nd run zscore filter
+manually annotate real noise pixels in some sub images
+try on different images (camera + lower exposure and ISO)
+'''
+
+
 import os
 import shutil
 import rawpy
@@ -407,7 +415,9 @@ if __name__ == '__main__':
     c, r = 0, 0 #column, row to initialize object - will be changed inside the loop
     imageBayerChannels = BayerChannels(redChan, green_rChan, blueChan, green_bChan, c, r, w, h)
     #initialization of object that will be used to closely examine pixels initially labelled as suspicious
-    secondRunBayerChannels = BayerChannels(redChan, green_rChan, blueChan, green_bChan, c, r, 5, 5)
+    examinationWindowSize = 5 #the examination window is square so this is the width and height
+    secondRunBayerChannels = BayerChannels(redChan, green_rChan, blueChan, green_bChan,
+                                           c, r, examinationWindowSize, examinationWindowSize)
     finalIndex = []
     for y in range(int(subImageRows)):
         rawMosaicSplit[y * intervalH] = lineConst # put in a horizontal line
@@ -503,13 +513,16 @@ if __name__ == '__main__':
 
             print('--------------------------------------------------------------------------------------')
 
+            #SECOND FILTER
             #examine the 5x5 surrounding subimage of suspicious pixels
             for j in range(len(indexOfNoise)):
                 # the indexes of redSubImage to use to access this suspicious pixel
-                # a is row, b is column
-                a, b = int(indexOfNoise[j][0]/2), int(indexOfNoise[j][1]/2)
-                #sets column, row to the upper left of the wanted sub-sub image
-                secondRunBayerChannels.set_column_row(a - 2, b - 2)
+                # a is column, b is row
+                c_suspiciousPixel, r_suspiciousPixel = int(indexOfNoise[j][0]/2), int(indexOfNoise[j][1]/2)
+                # integer division to find what the top left pixel of the examination window should be set to
+                offset = examinationWindowSize//2
+                # sets column, row to the upper left of the wanted sub-sub image
+                secondRunBayerChannels.set_column_row(c_suspiciousPixel - offset, r_suspiciousPixel - offset)
 
                 #get a 5x5 subimage with the upper left coordinate at a-2, b-2
                 redSubSubImage = secondRunBayerChannels.get_red_subimage()
@@ -526,17 +539,18 @@ if __name__ == '__main__':
                 #stats of 5x5 subimage
                 subStats = secondRunBayerChannels.all_channel_stats()
 
-                #check specified pixel to see if it is actually noise
+                #check specified pixel to see if it makes it through the second filter
                 noise = False
                 mean, stdv = secondRunBayerChannels.one_channel_stats(indexOfNoise[j][2], subStats)
                 maxLimit = mean + stdv
-                if (indexOfNoise[j][4] < pctOfMax * indexOfNoise[j][3]) and (indexOfNoise[j][3] > maxLimit):  # and ((stdvOfPixel/meanOfPixel) > 1.5):
+                zscore = (indexOfNoise[j][3] - mean) / stdv
+                if (indexOfNoise[j][4] < pctOfMax * indexOfNoise[j][3]) and (indexOfNoise[j][3] > maxLimit) and (zscore > 1.5):
                     noise = True
                     #append column, row, channel of noise,
                     #max, 2nd highest, mean of 5x5, stdv of 5x5, zscore of max in 5x5
                     finalIndex.append([indexOfNoise[j][0], indexOfNoise[j][1], indexOfNoise[j][2],
                                        indexOfNoise[j][3], indexOfNoise[j][4],
-                                       mean, stdv, (indexOfNoise[j][3] - mean) / stdv
+                                       mean, stdv, zscore
                                        ])
 
             x = x + 1
@@ -545,7 +559,7 @@ if __name__ == '__main__':
         y = y + 1
 
     data = np.asarray(finalIndex)
-    title = f"visual_noise/{name[-1]}_finalNoise.csv"
+    title = f"visual_noise/{name[-1]}_finalNoise_squareWindowSize{examinationWindowSize}.csv"
     headers = ['column', 'row', 'max channel', 'maximum', '2nd highest', 'max channel average', 'max channel stdv',
                'zscore of max']
     try:
