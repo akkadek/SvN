@@ -8,12 +8,9 @@
 # The following code sample assumes that at least one NEF (or nef) image file is in a folder named 'images'
 # in the current working directory.
 
-'''
-try different examination window sizes
-try adding 2nd run zscore filter
-manually annotate real noise pixels in some sub images
-try on different images (camera + lower exposure and ISO)
-'''
+#This code cannot analyze pixels along the edge of images at this point in time, due to secondPass
+#because this filter requires an examination window centered on the suspicious pixel
+
 
 
 import os
@@ -87,6 +84,7 @@ def extractOneBayerChannel(rawArr, rawColors, channelNumber, verbose=False):
     oneRawChanArr = oneRawChanArr.reshape(nrows, ncols)  # reshape 1D -> 2D
 
     if verbose:
+        print(f'rawColors is {rawColors}')
         print(
             f'\n - - - - - - \n channelNumber = {channelNumber}:   chanMask = \n{chanMask}   chanMask.shape = {chanMask.shape}')
         print(f'\n - - - - - - \n rawArr/2: nrows, ncols = {nrows}, {ncols}')
@@ -115,7 +113,6 @@ def imgShow(img, r=0, c=0, h=0, w=0, folder='', title='', cmap='gray', colorbar=
     plt.savefig(f'visual_noise/{folder}/{title}_image.png')
     plt.close()
     plt.show()
-
 
 #%%
 def standarise(array_values, pct, pct_lower):
@@ -308,10 +305,18 @@ class BayerChannels:
 
     def all_channel_stats(self):
         red, green_r, blue, green_b = self.all_channel_flat()
-        redStats = np.mean(red), np.std(red)
-        green_rStats = np.mean(green_r), np.std(green_r)
-        blueStats = np.mean(blue), np.std(blue)
-        green_bStats = np.mean(green_b), np.std(green_b)
+        r_q75, r_q25 = np.percentile(red, [75, 25])
+        red_iqr = r_q75 - r_q25
+        redStats = np.mean(red), np.std(red), np.median(red), red_iqr
+        g_r_q75, g_r_q25 = np.percentile(green_r, [75, 25])
+        green_r_iqr = g_r_q75 - g_r_q25
+        green_rStats = np.mean(green_r), np.std(green_r), np.median(green_r), green_r_iqr
+        b_q75, b_q25 = np.percentile(blue, [75, 25])
+        blue_iqr = b_q75 - b_q25
+        blueStats = np.mean(blue), np.std(blue), np.median(blue), blue_iqr
+        g_b_q75, g_b_q25 = np.percentile(green_b, [75, 25])
+        green_b_iqr = g_b_q75 - g_b_q25
+        green_bStats = np.mean(green_b), np.std(green_b), np.median(green_b), green_b_iqr
         return redStats, green_rStats, blueStats, green_bStats
 
     @staticmethod
@@ -325,6 +330,120 @@ class BayerChannels:
         if channel == 'green_b':
             return stats[3]
 
+#%%
+def firstPass(column, row):
+    # set the row and column to the coordinates of this subimage
+    imageBayerChannels.set_column_row(column, row)
+
+    # retrieve only the subimage portions of each channel that we need
+    redSubImage = imageBayerChannels.get_red_subimage()
+    green_rSubImage = imageBayerChannels.get_green_r_subimage()
+    blueSubImage = imageBayerChannels.get_blue_subimage()
+    green_bSubImage = imageBayerChannels.get_green_b_subimage()
+
+    print('\n')
+    print(f'number {count}')
+
+    # flatten the subimages for calculating the stats and running through the visual noise loop
+    redChan_flat = redSubImage.flatten()
+    green_rChan_flat = green_rSubImage.flatten()
+    blueChan_flat = blueSubImage.flatten()
+    green_bChan_flat = green_bSubImage.flatten()
+
+    # calculate the mean and std dev for each channel in the subimage and save them to a 4x2 array named 'stats'
+    stats = imageBayerChannels.all_channel_stats()
+
+
+    plt.figure()
+    # create an array where we will record information
+    passISuspiciousPixel = []
+    # the max proportion the second highest channel value can be of the max value
+    pctOfMax = 0.6
+
+    # run through every pixel in the subimage
+    for i in range(len(redChan_flat)):  # since all channels are the same size, we just use red for the range
+        # we assume a pixel is not noise until proven wrong
+        suspicious = False
+        # find largest and 2nd largest values and their channels
+        max, max2 = findMax(redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i])
+        # get the mean, stdv of the subimage for the channel that contains the max
+        # pass in stats to decrease program run time
+        mean, stdv, median, iqr = imageBayerChannels.one_channel_stats(max[1], stats)
+        # the minimum value the max must be to be classified as noise
+        maxLimit = mean + stdv
+        # calculate the average of the four channel values at this pixel location
+        meanOfPixel = np.mean([redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i]])
+        # calculate the standard deviation of the four channel values at this pixel location
+        stdvOfPixel = np.std([redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i]])
+
+        # check conditions to determine if there is noise at this pixel
+        if (max2[0] < pctOfMax * max[0]) and (max[0] > maxLimit):  # and ((stdvOfPixel/meanOfPixel) > 1.5):
+            suspicious = True
+            columnCoordinate = c + (i % w)
+            rowCoordinate = r + (i // w)
+
+        # if this pixel has noise, record some information
+        if (suspicious == True):
+            # rawMosaicSplit[(r + (i // w)) * 2][(c + (i % w)) * 2] = 4000
+            # appends x coordinate, y coordinate, the channel that contains the damage,
+            # the damaged channel value (the max), and the 2nd highest channel value,
+            # the RGBG2 mean and standard deviations, the average and stdv of the four channels
+            # at this pixel location, and the weighted stdv at this location
+            passISuspiciousPixel.append([columnCoordinate * 2, rowCoordinate * 2, max[1], max[0], max2[0],
+                                         stats[0][0], stats[0][1], stats[1][0], stats[1][1], stats[2][0],
+                                         stats[2][1], stats[3][0], stats[3][1],
+                                         meanOfPixel, stdvOfPixel, stdvOfPixel / meanOfPixel
+                                         ])
+
+    return passISuspiciousPixel
+
+#%%
+def secondPass(column, row):
+    secondRunBayerChannels.set_column_row(column, row)
+
+    # get a 5x5 subimage with the upper left coordinate at a-2, b-2
+    redSubSubImage = secondRunBayerChannels.get_red_subimage()
+    green_rSubSubImage = secondRunBayerChannels.get_green_r_subimage()
+    blueSubSubImage = secondRunBayerChannels.get_blue_subimage()
+    green_bSubSubImage = secondRunBayerChannels.get_green_b_subimage()
+
+    # flatten the 5x5 subimages
+    redChanSS_flat = redSubSubImage.flatten()
+    green_rChanSS_flat = green_rSubSubImage.flatten()
+    blueChanSS_flat = blueSubSubImage.flatten()
+    green_bChanSS_flat = green_bSubSubImage.flatten()
+
+    # stats of 5x5 subimage
+    try:
+        subStats = secondRunBayerChannels.all_channel_stats()
+    except IndexError:
+        print(f'edge of image')
+        return passIISuspiciousPixels
+
+    # check specified pixel to see if it makes it through the second filter
+    # passISuspiciousPixel[0] = the column the suspicious pixel is in (x - coordinate)
+    # passISuspiciousPixel[1] = the row the suspicious pixel is in (y - coordinate)
+    # passISuspiciousPixel[2] = channel that contains the suspicious pixel
+    # passISuspiciousPixel[3] = the value of the max channel of the suspicious pixel
+    # passISuspiciousPixel[4] = the second highest value of the suspicious pixel
+    suspicious = False
+    mean, stdv, median, iqr = secondRunBayerChannels.one_channel_stats(passISuspiciousPixel[j][2], subStats)
+    maxLimit = mean + stdv
+    pctOfMax = 0.6
+    zscore = (passISuspiciousPixel[j][3] - mean) / stdv
+    mz_score = 0.6745*((passISuspiciousPixel[j][3] - median)/iqr)
+    if (passISuspiciousPixel[j][4] < pctOfMax * passISuspiciousPixel[j][3]) and (
+            passISuspiciousPixel[j][3] > maxLimit) and (zscore > 1.5):
+        suspicious = True
+        # append column, row, channel of suspicious pixel,
+        # max, 2nd highest, mean of 5x5, stdv of 5x5, zscore of max in 5x5
+        passIISuspiciousPixels.append(
+            [passISuspiciousPixel[j][0], passISuspiciousPixel[j][1], passISuspiciousPixel[j][2],
+             passISuspiciousPixel[j][3], passISuspiciousPixel[j][4],
+             mean, stdv, zscore, median, iqr, mz_score
+             ])
+
+    return passIISuspiciousPixels
 
 #%%
 if __name__ == '__main__':
@@ -343,18 +462,18 @@ if __name__ == '__main__':
 
     # Allow user to select one of the images:
     if useImg0:
-        selectedImgNum = 24
+        selectedImgNum = 19
     else:
         selectedImgNum = eval(input('Select desired image: '))
 
+    rawImg = readRawImage(rawImgList[selectedImgNum], verbose=True)  # read raw image object
 
-
-    rawImg = readRawImage(rawImgList[selectedImgNum])  # read raw image object
     #_visible so that the mosiaced image will not include the borders around the image
     rawMosaic = rawImg.raw_image_visible # Extract raw arrays from the raw image class. Note: MOSAICED image
     rawCFA = rawImg.raw_colors_visible  # Extract the color-filter array mask; 0,1,2,3 for R, G_r, G_b, B
+    print(f'rawCFA is {rawCFA}')
 
-    print(f'type(rawImage) = {type(rawMosaic)}   rawImage.shape = {rawMosaic.shape}')
+    print(f'type(rawMosaic) = {type(rawMosaic)}   rawMosaic.shape = {rawMosaic.shape}')
 
     # Display the *mosaiced* image as a grayscale image
     '''
@@ -371,13 +490,7 @@ if __name__ == '__main__':
 
     #the name of the image
     name = rawImgList[selectedImgNum].split('\\')
-    #folder for where the csv files will be saved
-    folder = f'{name[-1]} variable maxLimit with ratio minimum'
-    try:
-        os.mkdir(f'visual_noise/{folder}')
-    except FileExistsError:
-        shutil.rmtree(f'visual_noise/{folder}')
-        os.mkdir(f'visual_noise/{folder}')
+
 
     print(f'redChan shape is {redChan.shape}')
     print(f'green_rChan shape is {green_rChan.shape}')
@@ -389,36 +502,46 @@ if __name__ == '__main__':
 
     #the following calculations assume all of the four bayer channels have the same dimensions
     imageH, imageW = redChan.shape
-    subImageRows, subImageCols = 20, 25
+    #subImageRows, subImageCols = 20, 25
+
     # height and width of the subimages
-    h, w = int((imageH / subImageRows)), int((imageW / subImageCols))
+    #h, w = int((imageH / subImageRows)), int((imageW / subImageCols))
+    #due to other code we want the windows to be 142x170 sized
+    #because the single color channels are of smaller dimensions they have to be halved here
+    h, w = 142//2, 170//2
+    subImageRows = imageH//h
+    subImageCols = imageW//w
 
     #rawMosaic has different dimenstions than the 4 bayer channels (2x size)
     rawImageH, rawImageW = rawMosaic.shape
     print(f' imageH, imageW = {imageH}, {imageW} \n rawImageH, rawImageW = {rawImageH}, {rawImageW}')
+
     # for showing the image as subimages
     # so that we don't alter the original data
     rawMosaicSplit = rawMosaic.copy()
     lineConst = np.amax(rawMosaicSplit) - 1 #the value of the lines drawn on the output image
     intervalH = rawImageH//subImageRows
     intervalW = rawImageW//subImageCols
-    '''
-    try:
-        os.mkdir(f'visual_noise/{name[-1]}')
-        os.mkdir(f'visual_noise/{name[-1]}_withNoise')
-    except FileExistsError:
-        shutil.rmtree(f'visual_noise/{name[-1]}')
-        shutil.rmtree(f'visual_noise/{name[-1]}_withNoise')
-        os.mkdir(f'visual_noise/{name[-1]}')
-        os.mkdir(f'visual_noise/{name[-1]}_withNoise')
-    '''
+
     c, r = 0, 0 #column, row to initialize object - will be changed inside the loop
     imageBayerChannels = BayerChannels(redChan, green_rChan, blueChan, green_bChan, c, r, w, h)
     #initialization of object that will be used to closely examine pixels initially labelled as suspicious
-    examinationWindowSize = 5 #the examination window is square so this is the width and height
+    examinationWindowSize = 15 #the examination window is square so this is the width and height
     secondRunBayerChannels = BayerChannels(redChan, green_rChan, blueChan, green_bChan,
                                            c, r, examinationWindowSize, examinationWindowSize)
-    finalIndex = []
+    passIISuspiciousPixels = []
+
+    '''
+    # folder for where the csv files will be saved
+    folder = f'{name[-1]} ZMscore_windowsize{examinationWindowSize}'
+    try:
+        os.mkdir(f'visual_noise/{folder}')
+    except FileExistsError:
+        shutil.rmtree(f'visual_noise/{folder}')
+        os.mkdir(f'visual_noise/{folder}')
+    '''
+    #determine which pixels in the image are suspicious by running them through two filters
+    #the loops run through the image in subimages, first by row then by column
     for y in range(int(subImageRows)):
         rawMosaicSplit[y * intervalH] = lineConst # put in a horizontal line
         rawMosaicSplit[(y * intervalH) + 1] = lineConst
@@ -429,152 +552,73 @@ if __name__ == '__main__':
             r, c = y*h, x*w #row, column of upper left corner of subimage
             #note to self: column is x coordinate, row is y coordinate
 
-            #set the row and column to the coordinates of this subimage
-            imageBayerChannels.set_column_row(c, r)
+            #run the subimage through the first pass filter
+            #which finds suspicious pixels in the subimage and saves them in the returned array
+            passISuspiciousPixel = firstPass(c, r)
 
-            #retrieve only the subimage portions of each channel that we need
-            redSubImage = imageBayerChannels.get_red_subimage()
-            green_rSubImage = imageBayerChannels.get_green_r_subimage()
-            blueSubImage = imageBayerChannels.get_blue_subimage()
-            green_bSubImage = imageBayerChannels.get_green_b_subimage()
-
-            print('\n')
-            print(f'number {count}')
-
-            #flatten the subimages for calculating the stats and running through the visual noise loop
-            redChan_flat = redSubImage.flatten()
-            green_rChan_flat = green_rSubImage.flatten()
-            blueChan_flat = blueSubImage.flatten()
-            green_bChan_flat = green_bSubImage.flatten()
-
-            #calculate the mean and std dev for each channel in the subimage and save them to a 4x2 array named 'stats'
-            stats = imageBayerChannels.all_channel_stats()
-            print(f'all_channel_stats {stats}')
-
-            plt.figure()
-            #create an array where we will record information
-            indexOfNoise = []
-            #the max proportion the second highest channel value can be of the max value
-            pctOfMax = 0.6
-
-            #run through every pixel in the subimage
-            for i in range(len(redChan_flat)):  # since all channels are the same size, we just use red for the range
-                #we assume a pixel is not noise until proven wrong
-                noise = False
-                #find largest and 2nd largest values and their channels
-                max, max2 = findMax(redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i])
-                # get the mean, stdv of the subimage for the channel that contains the max
-                # pass in stats to decrease program run time
-                mean, stdv = imageBayerChannels.one_channel_stats(max[1], stats)
-                # the minimum value the max must be to be classified as noise
-                maxLimit = mean + stdv
-                #calculate the average of the four channel values at this pixel location
-                meanOfPixel = np.mean([redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i]])
-                #calculate the standard deviation of the four channel values at this pixel location
-                stdvOfPixel = np.std([redChan_flat[i], green_rChan_flat[i], blueChan_flat[i], green_bChan_flat[i]])
-
-                #check conditions to determine if there is noise at this pixel
-                if (max2[0] < pctOfMax * max[0]) and (max[0] > maxLimit) : #and ((stdvOfPixel/meanOfPixel) > 1.5):
-                    noise = True
-                    columnCoordinate = c + (i % w)
-                    rowCoordinate = r + (i // w)
-
-                #if this pixel has noise, record some information
-                if (noise == True):
-                    #rawMosaicSplit[(r + (i // w)) * 2][(c + (i % w)) * 2] = 4000
-                    # appends x coordinate, y coordinate, the channel that contains the damage,
-                    # the damaged channel value (the max), and the 2nd highest channel value,
-                    # the RGBG2 mean and standard deviations, the average and stdv of the four channels
-                    # at this pixel location, and the weighted stdv at this location
-                    indexOfNoise.append([columnCoordinate * 2, rowCoordinate * 2, max[1], max[0], max2[0],
-                                         stats[0][0], stats[0][1], stats[1][0], stats[1][1], stats[2][0],
-                                         stats[2][1], stats[3][0], stats[3][1],
-                                         meanOfPixel, stdvOfPixel, stdvOfPixel/meanOfPixel
-                                         ])
-
-
+            '''
             #save the recorded information from the subimage
-            data = np.asarray(indexOfNoise)
-            title = f"visual_noise/{folder}/row{y+1}_column{x+1}_{name[-1]}_wRatioMin_pctOfMax{pctOfMax}_xy{c * 2}-{r * 2}_wh{w * 2}-{h * 2}.csv"
+            data = np.asarray(passISuspiciousPixel)
+            title = f"visual_noise/{folder}/row{y+1}_column{x+1}_{name[-1]}_wRatioMin_pctOfMax0.6_xy{c * 2}-{r * 2}_wh{w * 2}-{h * 2}.csv"
             headers = ['column', 'row', 'max channel', 'maximum', '2nd highest', 'red mean', 'red stdev', 'green_r mean', 'green_r stdev',
                             'blue mean', 'blue stdev', 'green_b mean', 'green_b stdev', 'pixel mean', 'pixel stdev', 'pixel stdev/mean']
+            # create a csv file with the information
             try:
-                #create a csv file with the information
-                pd.DataFrame(indexOfNoise).to_csv(title, header= headers)
+                pd.DataFrame(passISuspiciousPixel).to_csv(title, header= headers)
             except FileExistsError:
                 # if a csv file of the same name already exists, delete it and make a new one
                 shutil.rmtree(title)
-                pd.DataFrame(indexOfNoise).to_csv(title, header=headers)
+                pd.DataFrame(passISuspiciousPixel).to_csv(title, header=headers)
             except ValueError:
                 #if there is no information to record (no noise in the subimage) then delete the created csv
                 os.remove(title)
-                print('No noise')
+                print('No suspicious pixels')
                 pass
+            '''
 
             print('--------------------------------------------------------------------------------------')
 
             #SECOND FILTER
             #examine the 5x5 surrounding subimage of suspicious pixels
-            for j in range(len(indexOfNoise)):
+            for j in range(len(passISuspiciousPixel)):
                 # the indexes of redSubImage to use to access this suspicious pixel
                 # a is column, b is row
-                c_suspiciousPixel, r_suspiciousPixel = int(indexOfNoise[j][0]/2), int(indexOfNoise[j][1]/2)
+                c_suspiciousPixel, r_suspiciousPixel = int(passISuspiciousPixel[j][0]/2), int(passISuspiciousPixel[j][1]/2)
                 # integer division to find what the top left pixel of the examination window should be set to
                 offset = examinationWindowSize//2
+
                 # sets column, row to the upper left of the wanted sub-sub image
-                secondRunBayerChannels.set_column_row(c_suspiciousPixel - offset, r_suspiciousPixel - offset)
+                column, row = c_suspiciousPixel - offset, r_suspiciousPixel - offset
 
-                #get a 5x5 subimage with the upper left coordinate at a-2, b-2
-                redSubSubImage = secondRunBayerChannels.get_red_subimage()
-                green_rSubSubImage = secondRunBayerChannels.get_green_r_subimage()
-                blueSubSubImage = secondRunBayerChannels.get_blue_subimage()
-                green_bSubSubImage = secondRunBayerChannels.get_green_b_subimage()
+                #dtermine if the pixels determined to be suspicious by the first pass filter
+                # are still suspicious within their own square examination window
+                # if they are they will be saved to an array and returned
+                passIISuspiciousPixels = secondPass(column, row)
 
-                #flatten the 5x5 subimages
-                redChanSS_flat = redSubSubImage.flatten()
-                green_rChanSS_flat = green_rSubSubImage.flatten()
-                blueChanSS_flat = blueSubSubImage.flatten()
-                green_bChanSS_flat = green_bSubSubImage.flatten()
-
-                #stats of 5x5 subimage
-                subStats = secondRunBayerChannels.all_channel_stats()
-
-                #check specified pixel to see if it makes it through the second filter
-                noise = False
-                mean, stdv = secondRunBayerChannels.one_channel_stats(indexOfNoise[j][2], subStats)
-                maxLimit = mean + stdv
-                zscore = (indexOfNoise[j][3] - mean) / stdv
-                if (indexOfNoise[j][4] < pctOfMax * indexOfNoise[j][3]) and (indexOfNoise[j][3] > maxLimit) and (zscore > 1.5):
-                    noise = True
-                    #append column, row, channel of noise,
-                    #max, 2nd highest, mean of 5x5, stdv of 5x5, zscore of max in 5x5
-                    finalIndex.append([indexOfNoise[j][0], indexOfNoise[j][1], indexOfNoise[j][2],
-                                       indexOfNoise[j][3], indexOfNoise[j][4],
-                                       mean, stdv, zscore
-                                       ])
 
             x = x + 1
             count = count + 1
     
         y = y + 1
 
-    data = np.asarray(finalIndex)
-    title = f"visual_noise/{name[-1]}_finalNoise_squareWindowSize{examinationWindowSize}.csv"
+    data = np.asarray(passIISuspiciousPixels)
+    title = f"visual_noise/{name[-1]}_finalNoise_ZM_squareWindowSize{examinationWindowSize}.csv"
     headers = ['column', 'row', 'max channel', 'maximum', '2nd highest', 'max channel average', 'max channel stdv',
-               'zscore of max']
+               'zscore of max', 'median', 'IQR', 'MZ-score']
+    # create a csv file with the pixels that have passed through both filters (suspicious pixels)
     try:
-        # create a csv file with the information
-        pd.DataFrame(finalIndex).to_csv(title, header=headers)
+        pd.DataFrame(passIISuspiciousPixels).to_csv(title, header=headers)
     except FileExistsError:
         # if a csv file of the same name already exists, delete it and make a new one
         shutil.rmtree(title)
-        pd.DataFrame(finalIndex).to_csv(title, header=headers)
+        pd.DataFrame(passIISuspiciousPixels).to_csv(title, header=headers)
     except ValueError:
         # if there is no information to record (no noise in the subimage) then delete the created csv
         os.remove(title)
         print('No noise')
         pass
 
+    #display the image with lines dividing it into the subimages
     plt.imshow(rawMosaicSplit, cmap='gray')
     plt.title("rawMosaicSplit after lines")
     strFile = (f'visual_noise' + '/' + str(name[-1]) + '_split' + '.png')
